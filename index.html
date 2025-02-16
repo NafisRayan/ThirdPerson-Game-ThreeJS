@@ -48,15 +48,17 @@
         let rotationX = 0;
         const maxRotationX = Math.PI / 3; // Changed from PI/3 to PI/2 for more vertical freedom
 
-        // Enhanced lighting
-        const ambientLight = new THREE.AmbientLight(0xffffff, 0.3);
+        // Enhanced lighting for sun effect
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
         scene.add(ambientLight);
         
-        const directionalLight = new THREE.DirectionalLight(0xffffff, 1.5);
-        directionalLight.position.set(50, 50, 50);
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 2.0);
+        directionalLight.position.set(0, 200, 0); // Move light directly overhead
         directionalLight.castShadow = true;
         directionalLight.shadow.mapSize.width = 2048;
         directionalLight.shadow.mapSize.height = 2048;
+        directionalLight.shadow.camera.near = 0.5;
+        directionalLight.shadow.camera.far = 500;
         scene.add(directionalLight);
 
         renderer.shadowMap.enabled = true;
@@ -169,14 +171,6 @@
 
         scene.add(character);
 
-        // Vehicle
-        const vehicle = new THREE.Mesh(
-            new THREE.BoxGeometry(1, 0.5, 2),
-            new THREE.MeshStandardMaterial({ color: 0x0000ff })
-        );
-        vehicle.position.set(5, 0.25, 5);
-        scene.add(vehicle);
-
         // Movement controls
         const keys = {};
         const moveSpeed = 0.1;
@@ -209,6 +203,120 @@
 
         // Day/night cycle
         let time = 0;
+
+        // Add Sky and Clouds
+        scene.background = new THREE.Color(0x87CEEB); // Sky blue
+        
+        // Create clouds
+        function createCloud() {
+            const cloud = new THREE.Group();
+            const geometries = [
+                new THREE.SphereGeometry(0.5, 7, 7),
+                new THREE.SphereGeometry(0.4, 7, 7),
+                new THREE.SphereGeometry(0.45, 7, 7)
+            ];
+            const material = new THREE.MeshStandardMaterial({ 
+                color: 0xffffff,
+                transparent: true,
+                opacity: 0.9
+            });
+            
+            geometries.forEach((geo, i) => {
+                const mesh = new THREE.Mesh(geo, material);
+                mesh.position.set(i * 0.3, 0, 0);
+                cloud.add(mesh);
+            });
+            return cloud;
+        }
+
+        // Add multiple clouds
+        const clouds = [];
+        for(let i = 0; i < 20; i++) {
+            const cloud = createCloud();
+            cloud.position.set(
+                Math.random() * gridSize - gridSize/2,
+                10 + Math.random() * 5,
+                Math.random() * gridSize - gridSize/2
+            );
+            clouds.push(cloud);
+            scene.add(cloud);
+        }
+
+        // Enhanced lighting
+        directionalLight.intensity = 2.0;
+        directionalLight.position.set(50, 100, 50);
+        
+        // Add roads
+        const roadMaterial = new THREE.MeshStandardMaterial({ color: 0x333333 });
+        const roads = new THREE.Group();
+        
+        // Main road
+        const mainRoad = new THREE.Mesh(
+            new THREE.PlaneGeometry(2, gridSize),
+            roadMaterial
+        );
+        mainRoad.rotation.x = -Math.PI / 2;
+        mainRoad.position.set(gridSize/2, 0.01, gridSize/2);
+        roads.add(mainRoad);
+        
+        // Cross road
+        const crossRoad = new THREE.Mesh(
+            new THREE.PlaneGeometry(gridSize, 2),
+            roadMaterial
+        );
+        crossRoad.rotation.x = -Math.PI / 2;
+        crossRoad.position.set(gridSize/2, 0.01, gridSize/2);
+        roads.add(crossRoad);
+        scene.add(roads);
+
+        // Add lake
+        const lakeGeometry = new THREE.CircleGeometry(3, 32);
+        const lakeMaterial = new THREE.MeshStandardMaterial({
+            color: 0x0077be,
+            metalness: 0.9,
+            roughness: 0.1
+        });
+        const lake = new THREE.Mesh(lakeGeometry, lakeMaterial);
+        lake.rotation.x = -Math.PI / 2;
+        lake.position.set(gridSize/4, 0.01, gridSize/4);
+        scene.add(lake);
+
+        // Collision objects array
+        const collisionObjects = [];
+        
+        // Add collision boxes for trees
+        terrain.children.forEach(child => {
+            if(child instanceof THREE.Group) { // Tree groups
+                const boundingBox = new THREE.Box3();
+                boundingBox.setFromObject(child);
+                collisionObjects.push({
+                    box: boundingBox,
+                    object: child
+                });
+            }
+        });
+
+        // Add lake collision
+        const lakeBoundingBox = new THREE.Box3();
+        lakeBoundingBox.setFromObject(lake);
+        collisionObjects.push({
+            box: lakeBoundingBox,
+            object: lake
+        });
+
+        // Collision detection function
+        function checkCollisions(position) {
+            const characterBox = new THREE.Box3();
+            const characterSize = new THREE.Vector3(0.4, 1, 0.4);
+            characterBox.setFromCenterAndSize(position, characterSize);
+
+            for(const obj of collisionObjects) {
+                if(characterBox.intersectsBox(obj.box)) {
+                    return true;
+                }
+            }
+            return false;
+        }
 
         // Modified animation loop
         function animate() {
@@ -246,9 +354,22 @@
                 moveDirection.normalize();
                 
                 // Move character
-                character.position.add(moveDirection.multiplyScalar(moveSpeed));
+                const potentialMove = new THREE.Vector3();
+            
+                if (keys['w']) potentialMove.add(forward);
+                if (keys['s']) potentialMove.sub(forward);
+                if (keys['d']) potentialMove.add(right);
+                if (keys['a']) potentialMove.sub(right);
+
+                if(potentialMove.length() > 0) {
+                    potentialMove.normalize().multiplyScalar(moveSpeed);
+                    const newPosition = character.position.clone().add(potentialMove);
+                    
+                    if(!checkCollisions(newPosition)) {
+                        character.position.copy(newPosition);
+                    }
+                }
                 
-                // Rotate character to movement direction
                 character.rotation.y = rotationY;
             }
 
@@ -277,6 +398,14 @@
             directionalLight.position.x = Math.cos(time) * 10;
             directionalLight.position.y = Math.sin(time) * 10;
             directionalLight.intensity = Math.max(0.2, Math.sin(time));
+
+            // Animate clouds
+            clouds.forEach(cloud => {
+                cloud.position.x += 0.01;
+                if(cloud.position.x > gridSize) {
+                    cloud.position.x = -gridSize/2;
+                }
+            });
 
             renderer.render(scene, camera);
         }
