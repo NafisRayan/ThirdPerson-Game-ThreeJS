@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Three.js Open World</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script async src="https://unpkg.com/es-module-shims@1.6.3/dist/es-module-shims.js"></script>
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.159.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.159.0/examples/jsm/"
+            }
+        }
+    </script>
+</head>
+<body class="m-0 overflow-hidden">
+    <!-- UI Elements -->
+    <div class="fixed top-0 left-0 w-full p-4">
+        <div class="bg-gray-800/50 rounded p-2 text-white">
+            <div class="w-48 h-4 bg-gray-700 rounded">
+                <div id="healthBar" class="h-full bg-green-500 rounded" style="width: 100%"></div>
+            </div>
+        </div>
+    </div>
+    <!-- Minimap -->
+    <div id="minimap" class="fixed bottom-4 right-4 w-48 h-48 bg-gray-800/50 rounded"></div>
+
+    <script type="module">
+        import * as THREE from 'three';
+        // Remove OrbitControls import as we won't need it
+        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+        // Scene setup
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000); // Adjusted FOV
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        // Remove OrbitControls setup and replace with camera configuration
+        camera.position.set(0, 3, 5); // Initial camera position
+        
+        // Adjusted camera offset for closer view
+        const cameraOffset = new THREE.Vector3(0, 1.5, 3); // Moved camera closer
+        let rotationY = 0;
+        let rotationX = 0;
+        const maxRotationX = Math.PI / 3; // Changed from PI/3 to PI/2 for more vertical freedom
+
+        // Enhanced lighting
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.3);
+        scene.add(ambientLight);
+        
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 1.5);
+        directionalLight.position.set(50, 50, 50);
+        directionalLight.castShadow = true;
+        directionalLight.shadow.mapSize.width = 2048;
+        directionalLight.shadow.mapSize.height = 2048;
+        scene.add(directionalLight);
+
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+        // Expanded terrain
+        const gridSize = 30; // Increased grid size
+        const terrain = new THREE.Group();
+        for(let x = 0; x < gridSize; x++) {
+            for(let z = 0; z < gridSize; z++) {
+                const geometry = new THREE.PlaneGeometry(1, 1);
+                const material = new THREE.MeshStandardMaterial({
+                    color: 0x4a9c59,
+                    side: THREE.DoubleSide
+                });
+                const tile = new THREE.Mesh(geometry, material);
+                tile.rotation.x = -Math.PI / 2;
+                tile.position.set(x, 0, z);
+                tile.receiveShadow = true;
+                terrain.add(tile);
+
+                // Enhanced tree generation
+                if(Math.random() > 0.9) {
+                    const treeHeight = 0.8 + Math.random() * 0.4;
+                    const treeGroup = new THREE.Group();
+
+                    // Tree trunk
+                    const trunk = new THREE.Mesh(
+                        new THREE.CylinderGeometry(0.05, 0.08, treeHeight, 8),
+                        new THREE.MeshStandardMaterial({ color: 0x4b3621 })
+                    );
+                    trunk.position.y = treeHeight / 2;
+                    trunk.castShadow = true;
+                    treeGroup.add(trunk);
+
+                    // Tree leaves (multiple layers)
+                    const leafLayers = 3;
+                    for(let i = 0; i < leafLayers; i++) {
+                        const leaf = new THREE.Mesh(
+                            new THREE.ConeGeometry(0.3 - (i * 0.05), 0.4, 8),
+                            new THREE.MeshStandardMaterial({ 
+                                color: 0x2d5a27,
+                                flatShading: true 
+                            })
+                        );
+                        leaf.position.y = treeHeight - (i * 0.2);
+                        leaf.castShadow = true;
+                        treeGroup.add(leaf);
+                    }
+
+                    treeGroup.position.set(
+                        x + (Math.random() - 0.5) * 0.5,
+                        0,
+                        z + (Math.random() - 0.5) * 0.5
+                    );
+                    terrain.add(treeGroup);
+                }
+            }
+        }
+        scene.add(terrain);
+
+        // Improved character model
+        const character = new THREE.Group();
+        
+        // Body
+        const body = new THREE.Mesh(
+            new THREE.CapsuleGeometry(0.15, 0.3, 4, 8),
+            new THREE.MeshStandardMaterial({ color: 0x3366cc })
+        );
+        body.position.y = 0.4;
+        body.castShadow = true;
+        character.add(body);
+
+        // Head
+        const head = new THREE.Mesh(
+            new THREE.SphereGeometry(0.12, 8, 8),
+            new THREE.MeshStandardMaterial({ color: 0xffdbac })
+        );
+        head.position.y = 0.7;
+        head.castShadow = true;
+        character.add(head);
+
+        // Arms
+        const armGeometry = new THREE.CapsuleGeometry(0.04, 0.2, 4, 8);
+        const armMaterial = new THREE.MeshStandardMaterial({ color: 0x3366cc });
+        
+        const leftArm = new THREE.Mesh(armGeometry, armMaterial);
+        leftArm.position.set(-0.2, 0.4, 0);
+        leftArm.castShadow = true;
+        character.add(leftArm);
+        
+        const rightArm = new THREE.Mesh(armGeometry, armMaterial);
+        rightArm.position.set(0.2, 0.4, 0);
+        rightArm.castShadow = true;
+        character.add(rightArm);
+
+        // Legs
+        const legGeometry = new THREE.CapsuleGeometry(0.05, 0.2, 4, 8);
+        const legMaterial = new THREE.MeshStandardMaterial({ color: 0x1a4b8c });
+        
+        const leftLeg = new THREE.Mesh(legGeometry, legMaterial);
+        leftLeg.position.set(-0.08, 0.15, 0);
+        leftLeg.castShadow = true;
+        character.add(leftLeg);
+        
+        const rightLeg = new THREE.Mesh(legGeometry, legMaterial);
+        rightLeg.position.set(0.08, 0.15, 0);
+        rightLeg.castShadow = true;
+        character.add(rightLeg);
+
+        scene.add(character);
+
+        // Vehicle
+        const vehicle = new THREE.Mesh(
+            new THREE.BoxGeometry(1, 0.5, 2),
+            new THREE.MeshStandardMaterial({ color: 0x0000ff })
+        );
+        vehicle.position.set(5, 0.25, 5);
+        scene.add(vehicle);
+
+        // Movement controls
+        const keys = {};
+        const moveSpeed = 0.1;
+        let moveDirection = new THREE.Vector3();
+        
+        window.addEventListener('keydown', (e) => keys[e.key.toLowerCase()] = true);
+        window.addEventListener('keyup', (e) => keys[e.key.toLowerCase()] = false);
+
+        // Mouse control variables
+        const mouse = {
+            x: 0,
+            y: 0,
+            moveX: 0,
+            moveY: 0,
+            sensitivity: 0.002
+        };
+
+        // Lock pointer for FPS-style mouse control
+        renderer.domElement.addEventListener('click', () => {
+            renderer.domElement.requestPointerLock();
+        });
+
+        // Mouse movement handler
+        document.addEventListener('mousemove', (event) => {
+            if (document.pointerLockElement === renderer.domElement) {
+                mouse.moveX = event.movementX;
+                mouse.moveY = event.movementY;
+            }
+        });
+
+        // Day/night cycle
+        let time = 0;
+
+        // Modified animation loop
+        function animate() {
+            requestAnimationFrame(animate);
+
+            // Update camera rotation
+            rotationY -= mouse.moveX * mouse.sensitivity;
+            rotationX -= mouse.moveY * mouse.sensitivity;
+            rotationX = Math.max(-maxRotationX, Math.min(maxRotationX, rotationX));
+            
+            // Reset mouse movement
+            mouse.moveX = 0;
+            mouse.moveY = 0;
+
+            // Movement relative to camera direction
+            moveDirection.set(0, 0, 0);
+            if (keys['w'] || keys['s'] || keys['a'] || keys['d']) {
+                // Calculate forward and right vectors with inverted forward direction
+                const forward = new THREE.Vector3(
+                    -Math.sin(rotationY), // Inverted
+                    0,
+                    -Math.cos(rotationY)  // Inverted
+                );
+                const right = new THREE.Vector3(
+                    Math.sin(rotationY + Math.PI/2),
+                    0,
+                    Math.cos(rotationY + Math.PI/2)
+                );
+
+                if (keys['w']) moveDirection.add(forward);
+                if (keys['s']) moveDirection.sub(forward);
+                if (keys['d']) moveDirection.add(right);
+                if (keys['a']) moveDirection.sub(right);
+
+                moveDirection.normalize();
+                
+                // Move character
+                character.position.add(moveDirection.multiplyScalar(moveSpeed));
+                
+                // Rotate character to movement direction
+                character.rotation.y = rotationY;
+            }
+
+            // Update camera position
+            const idealOffset = new THREE.Vector3(
+                Math.sin(rotationY) * cameraOffset.z,
+                cameraOffset.y,
+                Math.cos(rotationY) * cameraOffset.z
+            );
+            
+            // Apply vertical rotation
+            idealOffset.applyAxisAngle(
+                new THREE.Vector3(Math.sin(rotationY), 0, Math.cos(rotationY)),
+                rotationX
+            );
+
+            camera.position.copy(character.position).add(idealOffset);
+            camera.lookAt(
+                character.position.x,
+                character.position.y + 1,
+                character.position.z
+            );
+
+            // Day/night cycle
+            time += 0.001;
+            directionalLight.position.x = Math.cos(time) * 10;
+            directionalLight.position.y = Math.sin(time) * 10;
+            directionalLight.intensity = Math.max(0.2, Math.sin(time));
+
+            renderer.render(scene, camera);
+        }
+
+        // Window resize handler
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        animate();
+    </script>
+</body>
+</html>
